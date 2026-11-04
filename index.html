@@ -663,7 +663,7 @@ function renderHome(){
 
   // 本周聚焦：日期段与本周边界相交的任务
   const wk=weekDates(); const wkA=wk[0], wkB=wk[6]; const prankW={P0:0,P1:1,P2:2};
-  const wfRows = taskRows(data).filter(({x})=>{ const r=taskRange(x); return r.a ? (r.b>=wkA && r.a<=wkB) : false; })
+  const wfRows = taskRows(data).filter(({x})=>{ if(x.repeat) return wk.some(ds=>matchRepeat(x,ds)); const r=taskRange(x); return r.a ? (r.b>=wkA && r.a<=wkB) : false; })
     .sort((a,b)=>(a.x.done?1:0)-(b.x.done?1:0) || (prankW[a.x.priority]??9)-(prankW[b.x.priority]??9) || (a.x.id-b.x.id));
   const wfDone = wfRows.filter(r=>r.x.done).length;
   const wfPct = wfRows.length ? Math.round(wfDone/wfRows.length*100) : 0;
@@ -873,7 +873,20 @@ function wireHome(){
 
 /* ---------- 日历页（月 / 周视图） ---------- */
 let calView="month", calCursor=null, calSel=null;
+const WD_CN=["日","一","二","三","四","五","六"];
+function repeatText(x){ const r=x.repeat; if(!r) return "";
+  if(r.freq==="weekly") return `每周${WD_CN[+r.wd]||""}`;
+  if(r.freq==="monthly") return `每月${r.day}日`;
+  return ""; }
+function matchRepeat(x,ds){ const r=x.repeat; if(!r) return false;
+  if(x.start && ds<x.start) return false;
+  if(x.end && ds>x.end) return false;
+  const dt=new Date(`${ds}T00:00:00`);
+  if(r.freq==="weekly") return dt.getDay()===+r.wd;
+  if(r.freq==="monthly"){ const last=new Date(dt.getFullYear(),dt.getMonth()+1,0).getDate(); return dt.getDate()===Math.min(+r.day||1,last); }
+  return false; }
 function dateRangeText(x){
+  const rp=repeatText(x); if(rp) return rp;
   const a=x.start||"", b=x.end||a;
   if(!a&&!b) return "";
   if(a&&b&&a!==b) return `${a.slice(5)} → ${b.slice(5)}`;
@@ -881,7 +894,7 @@ function dateRangeText(x){
 }
 function taskRange(x){ const a=x.start||x.end||""; const b=x.end||x.start||""; return {a,b}; }
 function tasksOnDay(ds){
-  return taskRows(data).filter(({x})=>{ const r=taskRange(x); return r.a?ds>=r.a&&ds<=r.b:false; });
+  return taskRows(data).filter(({x})=>{ if(x.repeat) return matchRepeat(x,ds); const r=taskRange(x); return r.a?ds>=r.a&&ds<=r.b:false; });
 }
 function chkCountOnDay(ds){ return (data.checkin||[]).filter(x=>x.log&&x.log[ds]).length; }
 function isoOf(y,m,d){ return `${y}-${String(m+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`; }
@@ -1135,6 +1148,9 @@ function openEditor(key, item){
       <div class="field"><label>所属清单</label><select id="f-list">${lists.map(mm=>`<option value="${mm.key}" ${mm.key===key?"selected":""}>${esc(mm.name)}</option>`).join("")}</select></div>
       <div class="frow"><div class="field"><label>开始日期</label><input id="f-start" type="date" value="${d.start||''}"/></div>
         <div class="field"><label>结束日期</label><input id="f-end" type="date" value="${d.end||''}"/></div></div>
+      <div class="field"><label>重复</label><div class="seg" id="f-rep">${[["none","不重复"],["weekly","每周"],["monthly","每月"]].map(o=>`<div class="opt ${(d.repeat?d.repeat.freq:"none")===o[0]?'on':''}" data-v="${o[0]}">${o[1]}</div>`).join("")}</div></div>
+      <div class="frow" id="f-rep-row"><div class="field" id="f-rep-week"><label>每周几</label><select id="f-rep-week-sel">${[0,1,2,3,4,5,6].map(i=>`<option value="${i}" ${((d.repeat&&d.repeat.freq==="weekly"?d.repeat.wd:new Date().getDay())===i)?"selected":""}>周${"日一二三四五六"[i]}</option>`).join("")}</select></div>
+        <div class="field" id="f-rep-month"><label>每月几号</label><select id="f-rep-month-sel">${Array.from({length:31},(_,i)=>i+1).map(n=>`<option value="${n}" ${((d.repeat&&d.repeat.freq==="monthly"?d.repeat.day:new Date().getDate())===n)?"selected":""}>${n} 号</option>`).join("")}</select></div></div>
       <div class="field"><label>备注</label><textarea id="f-note" placeholder="补充说明">${esc(d.note||'')}</textarea></div>`;
   } else if(m.type==="checkin"){
     fields=`<div class="field"><label>打卡项</label><input id="f-title" value="${attr(d.title)}" placeholder="例如：喝够 8 杯水"/></div>
@@ -1191,6 +1207,15 @@ function openEditor(key, item){
   overlay.querySelectorAll(".seg").forEach(seg=>seg.querySelectorAll(".opt").forEach(o=>o.onclick=()=>{
     seg.querySelectorAll(".opt").forEach(x=>x.classList.remove("on")); o.classList.add("on");
   }));
+  const repSeg=overlay.querySelector("#f-rep");
+  if(repSeg){
+    const row=overlay.querySelector("#f-rep-row"), wcol=overlay.querySelector("#f-rep-week"), mcol=overlay.querySelector("#f-rep-month");
+    const sync=()=>{ const v=repSeg.querySelector(".on").dataset.v;
+      row.style.display=v==="none"?"none":"";
+      wcol.style.display=v==="weekly"?"":"none";
+      mcol.style.display=v==="monthly"?"":"none"; };
+    repSeg.querySelectorAll(".opt").forEach(o=>o.addEventListener("click",()=>{ sync(); row.scrollIntoView({block:"nearest"}); })); sync();
+  }
   if(editing) overlay.querySelector("#m-del").onclick=()=>{ close(); confirmDelete(key, d.id); };
   overlay.querySelector("#m-save").onclick=()=>{
     const val=id=>{ const el=overlay.querySelector(id); return el?el.value:undefined; };
@@ -1198,7 +1223,11 @@ function openEditor(key, item){
     d.title=(val("#f-title")||"").trim()||"未命名";
     if(m.type==="note"){ d.layout=seg("#f-layout")||'default'; }
     if(m.type==="todo"){ d.priority=seg("#f-prio")||d.priority; d.note=(val("#f-note")||"").trim();
-      d.start=val("#f-start")||""; d.end=val("#f-end")||""; if(!d.end) d.end=d.start; }
+      d.start=val("#f-start")||""; d.end=val("#f-end")||""; if(!d.end) d.end=d.start;
+      const rp=seg("#f-rep");
+      if(rp==="weekly") d.repeat={freq:"weekly",wd:+val("#f-rep-week-sel")};
+      else if(rp==="monthly") d.repeat={freq:"monthly",day:+val("#f-rep-month-sel")};
+      else delete d.repeat; }
     else if(m.type==="progress"){ d.current=Math.max(0,+val("#f-cur")||0); d.target=Math.max(1,+val("#f-tgt")||1); d.unit=(val("#f-unit")||"").trim(); d.note=(val("#f-note")||"").trim(); }
     else if(m.type==="finance"){ d.type=seg("#f-ftype")||"expense"; d.amount=Math.max(0,+val("#f-amt")||0); d.category=seg("#f-cat")||(m.categories&&m.categories[0])||"其他"; d.date=val("#f-date"); }
     else if(m.type==="note"){ d.mood=seg("#f-mood")||d.mood||""; d.content=(val("#f-content")||"").trim(); d.date=val("#f-date"); }
