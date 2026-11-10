@@ -676,8 +676,15 @@ function renderHome(){
   }).join("") : `<div class="wf-empty">${icon("calendar",16)}<span>本周还没有安排任务</span></div>`;
 
   // pinned tasks (置顶) — 跨模块收集 item.pinned；就地交互，不跳转
-  const pins=[];
-  CONFIG.modules.forEach(m=>(data[m.key]||[]).forEach(x=>{ if(x.pinned) pins.push({m,x}); }));
+  const pins=[]; let pinnedTotal=0;
+  CONFIG.modules.forEach(m=>(data[m.key]||[]).forEach(x=>{
+    if(!x.pinned) return;
+    pinnedTotal++;
+    if(m.type==="todo" && x.done) return;
+    if(m.type==="checkin" && x.log && x.log[today()]) return;
+    if(m.type==="progress" && +x.current>=+(x.target||0)) return;
+    pins.push({m,x});
+  }));
   const chkMark=icon("check",13,2.6);
   const pinSub=(m,x)=>{
     if(m.type==="checkin") return `${m.name} · 连续 ${streak(x.log)} 天`;
@@ -694,7 +701,8 @@ function renderHome(){
       <span class="pin-ic" style="color:${m.color}">${icon(m.icon,17)}</span>
       <div class="pin-b js-pin-open" data-mkey="${m.key}" data-id="${x.id}"><div class="pin-t ${(m.type==='todo'&&x.done)?'done':''}">${esc(x.title)}</div><div class="pin-m">${pinSub(m,x)}</div></div>
       ${pinCtl(m,x)}</div>`).join("")
-    : `<div class="pin-empty">在任意模块点击 <span class="mini-star">${icon("star",13)}</span> 即可把重要任务置顶到这里</div>`;
+    : (pinnedTotal ? `<div class="pin-empty">置顶项都已完成，今天可以松口气了</div>`
+      : `<div class="pin-empty">在任意模块点击 <span class="mini-star">${icon("star",13)}</span> 即可把重要任务置顶到这里</div>`);
 
   // 今日待办：四个清单合并，未完成按 P0 > P1 > P2 排序
   const prank={P0:0,P1:1,P2:2};
